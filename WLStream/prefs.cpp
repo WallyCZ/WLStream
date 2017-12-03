@@ -1,6 +1,8 @@
 // prefs.cpp
 
 #include "common.h"
+#include "out_console.h"
+#include "out_wavefile.h"
 
 #define DEFAULT_FILE L"WLStream.wav"
 
@@ -8,7 +10,7 @@ void usage(LPCWSTR exe);
 HRESULT get_default_device(IMMDevice **ppMMDevice);
 HRESULT list_devices();
 HRESULT get_specific_device(LPCWSTR szLongName, IMMDevice **ppMMDevice);
-HRESULT open_file(LPCWSTR szFileName, HMMIO *phFile);
+//HRESULT open_file(LPCWSTR szFileName, HMMIO *phFile);
 
 void usage(LPCWSTR exe) {
 	LOG(
@@ -26,14 +28,14 @@ void usage(LPCWSTR exe) {
 
 CPrefs::CPrefs(int argc, LPCWSTR argv[], HRESULT &hr)
 	: m_pMMDevice(NULL)
-	, m_hFile(NULL)
+	, m_output(NULL)
 	, m_bInt16(false)
 	, m_pwfx(NULL)
 	, m_szFilename(NULL)
 {
 	switch (argc) {
 	case 2:
-		if (0 == _wcsicmp(argv[1], L"-h") || 0 == _wcsicmp(argv[1], L"\?")) {
+		if (0 == _wcsicmp(argv[1], L"-h") || 0 == _wcsicmp(argv[1], L"/?")) {
 			// print usage but don't actually capture
 			hr = S_FALSE;
 			usage(argv[0]);
@@ -93,7 +95,7 @@ CPrefs::CPrefs(int argc, LPCWSTR argv[], HRESULT &hr)
 
 				m_szFilename = argv[i];
 
-				hr = open_file(m_szFilename, &m_hFile);
+				hr = COutWaveFile::OpenFile(m_szFilename, m_output);
 
 				continue;
 			}
@@ -122,16 +124,18 @@ CPrefs::CPrefs(int argc, LPCWSTR argv[], HRESULT &hr)
 				return;
 			}
 		}
+
+
+		if (NULL == m_output) {
+			 hr = COutConsole::CreateOutput(m_output);
+
+		}
 	}
 }
 
 CPrefs::~CPrefs() {
 	if (NULL != m_pMMDevice) {
 		m_pMMDevice->Release();
-	}
-
-	if (NULL != m_hFile) {
-		mmioClose(m_hFile, 0);
 	}
 
 	if (NULL != m_pwfx) {
@@ -336,21 +340,3 @@ HRESULT get_specific_device(LPCWSTR szLongName, IMMDevice **ppMMDevice) {
 	return S_OK;
 }
 
-HRESULT open_file(LPCWSTR szFileName, HMMIO *phFile) {
-	MMIOINFO mi = { 0 };
-
-	*phFile = mmioOpen(
-		// some flags cause mmioOpen write to this buffer
-		// but not any that we're using
-		const_cast<LPWSTR>(szFileName),
-		&mi,
-		MMIO_WRITE | MMIO_CREATE
-	);
-
-	if (NULL == *phFile) {
-		ERR(L"mmioOpen(\"%ls\", ...) failed. wErrorRet == %u", szFileName, mi.wErrorRet);
-		return E_FAIL;
-	}
-
-	return S_OK;
-}

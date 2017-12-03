@@ -1,3 +1,4 @@
+#pragma once
 // cleanup.h
 
 class AudioClientStopOnExit {

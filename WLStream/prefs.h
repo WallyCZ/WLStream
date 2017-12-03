@@ -1,9 +1,12 @@
+#pragma once
 // prefs.h
+#include "out_interface.h"
 
 class CPrefs {
 public:
 	IMMDevice *m_pMMDevice;
-	HMMIO m_hFile = NULL;
+	//HMMIO m_hFile = NULL;
+	IOutputPtr m_output;
 	bool m_bInt16;
 	PWAVEFORMATEX m_pwfx;
 	LPCWSTR m_szFilename;

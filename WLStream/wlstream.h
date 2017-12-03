@@ -1,3 +1,4 @@
+#pragma once
 // loopback-capture.h
 
 // call CreateThread on this function
@@ -9,11 +10,12 @@
 
 #include <io.h>
 #include <fcntl.h>
+#include "out_interface.h"
 
 struct WLStreamThreadFunctionArguments {
 	IMMDevice *pMMDevice;
 	bool bInt16;
-	HMMIO hFile;
+	IOutputPtr pOutput;
 	HANDLE hStartedEvent;
 	HANDLE hStopEvent;
 	UINT32 nFrames;

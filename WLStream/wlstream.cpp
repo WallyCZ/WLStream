@@ -2,15 +2,15 @@
 
 HRESULT WLStream(
 	IMMDevice *pMMDevice,
-	HMMIO hFile,
+	IOutputPtr pOutput,
 	bool bInt16,
 	HANDLE hStartedEvent,
 	HANDLE hStopEvent,
 	PUINT32 pnFrames
 );
 
-HRESULT WriteWaveHeader(HMMIO hFile, LPCWAVEFORMATEX pwfx, MMCKINFO *pckRIFF, MMCKINFO *pckData);
-HRESULT FinishWaveFile(HMMIO hFile, MMCKINFO *pckRIFF, MMCKINFO *pckData);
+//HRESULT WriteWaveHeader(HMMIO hFile, LPCWAVEFORMATEX pwfx, MMCKINFO *pckRIFF, MMCKINFO *pckData);
+//HRESULT FinishWaveFile(HMMIO hFile, MMCKINFO *pckRIFF, MMCKINFO *pckData);
 
 DWORD WINAPI WLStreamThreadFunction(LPVOID pContext) {
 	WLStreamThreadFunctionArguments *pArgs =
@@ -25,7 +25,7 @@ DWORD WINAPI WLStreamThreadFunction(LPVOID pContext) {
 
 	pArgs->hr = WLStream(
 		pArgs->pMMDevice,
-		pArgs->hFile,
+		pArgs->pOutput,
 		pArgs->bInt16,
 		pArgs->hStartedEvent,
 		pArgs->hStopEvent,
@@ -35,17 +35,16 @@ DWORD WINAPI WLStreamThreadFunction(LPVOID pContext) {
 	return 0;
 }
 
+
 HRESULT WLStream(
 	IMMDevice *pMMDevice,
-	HMMIO hFile,
+	IOutputPtr pOutput,
 	bool bInt16,
 	HANDLE hStartedEvent,
 	HANDLE hStopEvent,
 	PUINT32 pnFrames
 ) {
 	HRESULT hr;
-
-	_setmode(_fileno(stdout), _O_BINARY);
 
 	// activate an IAudioClient
 	IAudioClient *pAudioClient;
@@ -113,10 +112,8 @@ HRESULT WLStream(
 		}
 	}
 
-	MMCKINFO ckRIFF = { 0 };
-	MMCKINFO ckData = { 0 };
-	if (hFile != NULL)
-		hr = WriteWaveHeader(hFile, pwfx, &ckRIFF, &ckData);
+	hr = pOutput->Init(pwfx);
+
 	if (FAILED(hr)) {
 		// WriteWaveHeader does its own logging
 		return hr;
@@ -245,7 +242,7 @@ HRESULT WLStream(
 
 #pragma prefast(suppress: __WARNING_INCORRECT_ANNOTATION, "IAudioCaptureClient::GetBuffer SAL annotation implies a 1-byte buffer")
 			
-			if (hFile != NULL)
+			/*if (hFile != NULL)
 			{
 				int lBytesWritten = mmioWrite(hFile, reinterpret_cast<PCHAR>(pData), lBytesToWrite);
 
@@ -254,9 +251,9 @@ HRESULT WLStream(
 					getchar();
 					return E_UNEXPECTED;
 				}
-			}
+			}*/
 
-			fwrite(pData, 1, lBytesToWrite, stdout);
+			pOutput->ProcessBuffer(pData, lBytesToWrite, *pnFrames);
 
 			*pnFrames += nNumFramesToRead;
 
@@ -292,8 +289,10 @@ HRESULT WLStream(
 		}
 	} // capture loop
 
-	if (hFile != NULL)
-		hr = FinishWaveFile(hFile, &ckData, &ckRIFF);
+	/*if (hFile != NULL)
+		hr = FinishWaveFile(hFile, &ckData, &ckRIFF);*/
+
+	pOutput->DeInit(*pnFrames);
 
 	if (FAILED(hr)) {
 		// FinishWaveFile does it's own logging
@@ -303,84 +302,8 @@ HRESULT WLStream(
 	return hr;
 }
 
-HRESULT WriteWaveHeader(HMMIO hFile, LPCWAVEFORMATEX pwfx, MMCKINFO *pckRIFF, MMCKINFO *pckData) {
-	MMRESULT result;
 
-	// make a RIFF/WAVE chunk
-	pckRIFF->ckid = MAKEFOURCC('R', 'I', 'F', 'F');
-	pckRIFF->fccType = MAKEFOURCC('W', 'A', 'V', 'E');
-
-	result = mmioCreateChunk(hFile, pckRIFF, MMIO_CREATERIFF);
-	if (MMSYSERR_NOERROR != result) {
-		ERR(L"mmioCreateChunk(\"RIFF/WAVE\") failed: MMRESULT = 0x%08x", result);
-		return E_FAIL;
-	}
-
-	// make a 'fmt ' chunk (within the RIFF/WAVE chunk)
-	MMCKINFO chunk;
-	chunk.ckid = MAKEFOURCC('f', 'm', 't', ' ');
-	result = mmioCreateChunk(hFile, &chunk, 0);
-	if (MMSYSERR_NOERROR != result) {
-		ERR(L"mmioCreateChunk(\"fmt \") failed: MMRESULT = 0x%08x", result);
-		return E_FAIL;
-	}
-
-	// write the WAVEFORMATEX data to it
-	LONG lBytesInWfx = sizeof(WAVEFORMATEX) + pwfx->cbSize;
-	LONG lBytesWritten =
-		mmioWrite(
-			hFile,
-			reinterpret_cast<PCHAR>(const_cast<LPWAVEFORMATEX>(pwfx)),
-			lBytesInWfx
-		);
-	if (lBytesWritten != lBytesInWfx) {
-		ERR(L"mmioWrite(fmt data) wrote %u bytes; expected %u bytes", lBytesWritten, lBytesInWfx);
-		return E_FAIL;
-	}
-
-	// ascend from the 'fmt ' chunk
-	result = mmioAscend(hFile, &chunk, 0);
-	if (MMSYSERR_NOERROR != result) {
-		ERR(L"mmioAscend(\"fmt \" failed: MMRESULT = 0x%08x", result);
-		return E_FAIL;
-	}
-
-	// make a 'fact' chunk whose data is (DWORD)0
-	chunk.ckid = MAKEFOURCC('f', 'a', 'c', 't');
-	result = mmioCreateChunk(hFile, &chunk, 0);
-	if (MMSYSERR_NOERROR != result) {
-		ERR(L"mmioCreateChunk(\"fmt \") failed: MMRESULT = 0x%08x", result);
-		return E_FAIL;
-	}
-
-	// write (DWORD)0 to it
-	// this is cleaned up later
-	DWORD frames = 0;
-	lBytesWritten = mmioWrite(hFile, reinterpret_cast<PCHAR>(&frames), sizeof(frames));
-	if (lBytesWritten != sizeof(frames)) {
-		ERR(L"mmioWrite(fact data) wrote %u bytes; expected %u bytes", lBytesWritten, (UINT32)sizeof(frames));
-		return E_FAIL;
-	}
-
-	// ascend from the 'fact' chunk
-	result = mmioAscend(hFile, &chunk, 0);
-	if (MMSYSERR_NOERROR != result) {
-		ERR(L"mmioAscend(\"fact\" failed: MMRESULT = 0x%08x", result);
-		return E_FAIL;
-	}
-
-	// make a 'data' chunk and leave the data pointer there
-	pckData->ckid = MAKEFOURCC('d', 'a', 't', 'a');
-	result = mmioCreateChunk(hFile, pckData, 0);
-	if (MMSYSERR_NOERROR != result) {
-		ERR(L"mmioCreateChunk(\"data\") failed: MMRESULT = 0x%08x", result);
-		return E_FAIL;
-	}
-
-	return S_OK;
-}
-
-HRESULT FinishWaveFile(HMMIO hFile, MMCKINFO *pckRIFF, MMCKINFO *pckData) {
+/*HRESULT FinishWaveFile(HMMIO hFile, MMCKINFO *pckRIFF, MMCKINFO *pckData) {
 	MMRESULT result;
 
 	result = mmioAscend(hFile, pckData, 0);
@@ -396,4 +319,4 @@ HRESULT FinishWaveFile(HMMIO hFile, MMCKINFO *pckRIFF, MMCKINFO *pckData) {
 	}
 
 	return S_OK;
-}
+}*/

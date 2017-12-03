@@ -50,7 +50,7 @@ int do_everything(int argc, LPCWSTR argv[]) {
 	threadArgs.hr = E_UNEXPECTED; // thread will overwrite this
 	threadArgs.pMMDevice = prefs.m_pMMDevice;
 	threadArgs.bInt16 = prefs.m_bInt16;
-	threadArgs.hFile = prefs.m_hFile;
+	threadArgs.pOutput = prefs.m_output;
 	threadArgs.hStartedEvent = hStartedEvent;
 	threadArgs.hStopEvent = hStopEvent;
 	threadArgs.nFrames = 0;
@@ -160,58 +160,6 @@ int do_everything(int argc, LPCWSTR argv[]) {
 
 	if (S_OK != threadArgs.hr) {
 		ERR(L"Thread HRESULT is 0x%08x", threadArgs.hr);
-		return -__LINE__;
-	}
-
-	// everything went well... fixup the fact chunk in the file
-	MMRESULT result = mmioClose(prefs.m_hFile, 0);
-	prefs.m_hFile = NULL;
-	if (MMSYSERR_NOERROR != result) {
-		ERR(L"mmioClose failed: MMSYSERR = %u", result);
-		return -__LINE__;
-	}
-
-	// reopen the file in read/write mode
-	MMIOINFO mi = { 0 };
-	prefs.m_hFile = mmioOpen(const_cast<LPWSTR>(prefs.m_szFilename), &mi, MMIO_READWRITE);
-	if (NULL == prefs.m_hFile) {
-		ERR(L"mmioOpen(\"%ls\", ...) failed. wErrorRet == %u", prefs.m_szFilename, mi.wErrorRet);
-		return -__LINE__;
-	}
-
-	// descend into the RIFF/WAVE chunk
-	MMCKINFO ckRIFF = { 0 };
-	ckRIFF.ckid = MAKEFOURCC('W', 'A', 'V', 'E'); // this is right for mmioDescend
-	result = mmioDescend(prefs.m_hFile, &ckRIFF, NULL, MMIO_FINDRIFF);
-	if (MMSYSERR_NOERROR != result) {
-		ERR(L"mmioDescend(\"WAVE\") failed: MMSYSERR = %u", result);
-		return -__LINE__;
-	}
-
-	// descend into the fact chunk
-	MMCKINFO ckFact = { 0 };
-	ckFact.ckid = MAKEFOURCC('f', 'a', 'c', 't');
-	result = mmioDescend(prefs.m_hFile, &ckFact, &ckRIFF, MMIO_FINDCHUNK);
-	if (MMSYSERR_NOERROR != result) {
-		ERR(L"mmioDescend(\"fact\") failed: MMSYSERR = %u", result);
-		return -__LINE__;
-	}
-
-	// write the correct data to the fact chunk
-	LONG lBytesWritten = mmioWrite(
-		prefs.m_hFile,
-		reinterpret_cast<PCHAR>(&threadArgs.nFrames),
-		sizeof(threadArgs.nFrames)
-	);
-	if (lBytesWritten != sizeof(threadArgs.nFrames)) {
-		ERR(L"Updating the fact chunk wrote %u bytes; expected %u", lBytesWritten, (UINT32)sizeof(threadArgs.nFrames));
-		return -__LINE__;
-	}
-
-	// ascend out of the fact chunk
-	result = mmioAscend(prefs.m_hFile, &ckFact, 0);
-	if (MMSYSERR_NOERROR != result) {
-		ERR(L"mmioAscend(\"fact\") failed: MMSYSERR = %u", result);
 		return -__LINE__;
 	}
 
